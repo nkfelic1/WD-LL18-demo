@@ -35,9 +35,10 @@ async function fetchAndDisplayRandomRecipe() {
   recipeDisplay.innerHTML = "<p>Loading...</p>"; // Show loading message
   try {
     // Fetch a random recipe from the MealDB API
-    const res = await fetch('Add URL here'); // Replace with the actual API URL
+    const res = await fetch('https://www.themealdb.com/api/json/v1/1/random.php'); 
     const data = await res.json(); // Parse the JSON response
     const recipe = data.meals[0]; // Get the first recipe from the response
+    renderRecipe(recipe); // Display the recipe on the page
 
   } catch (error) {
     recipeDisplay.innerHTML = "<p>Sorry, couldn't load a recipe.</p>";
@@ -48,6 +49,8 @@ async function fetchAndDisplayRandomRecipe() {
 // --- Event listeners ---
 
 // When the button is clicked, get and show a new random recipe
+randomBtn.addEventListener("click", fetchAndDisplayRandomRecipe);
 
 
 // When the page loads, show a random recipe right away
+window.addEventListener("load", fetchAndDisplayRandomRecipe);
