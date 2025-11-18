@@ -187,13 +187,14 @@ async function remixCurrentRecipe() {
       pre.textContent = aiMessage.trim() || "(no response)";
       remixOutput.appendChild(pre);
       const msg = document.createElement("p");
-      msg.textContent = "(AI did not return strict JSON — showing raw output.)";
+      msg.textContent = "The assistant replied in an unexpected format — showing the response below.";
       remixOutput.appendChild(msg);
     }
 
   } catch (err) {
-    console.error(err);
-    remixOutput.innerHTML = `<p>Sorry — couldn't remix the recipe. ${err.message}</p>`;
+    console.error("Remix request failed:", err);
+    // Friendly message for users when something goes wrong with the AI request
+    remixOutput.innerHTML = "<p>Oops — we couldn't get a remix right now. Please try again in a moment.</p>";
   }
 }
 
