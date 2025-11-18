@@ -75,15 +75,15 @@ async function remixCurrentRecipe() {
   remixOutput.innerHTML = "<p>Remixing your recipe...</p>";
 
   try {
-    // Build the messages for the Chat Completions API
+    // Build the messages for the Chat Completions API and request JSON-only output
     const messages = [
       {
         role: "system",
-          content: "You are a playful, concise chef assistant. Produce a short, fun, creative, and totally doable remix of the provided recipe. Clearly highlight any changed ingredients and any changed cooking steps. Keep the result practical and easy to follow. IMPORTANT: Respond with JSON ONLY and nothing else. The JSON must follow this schema:\n{\n  \"title\": string,\n  \"ingredients\": [ { \"name\": string, \"amount\": string, \"changed\": boolean, \"note\": string }, ... ],\n  \"instructions\": string,\n  \"note\": string\n}\nDo not add any explanatory text outside the JSON."
+        content: `You are a playful, concise chef assistant. Return ONLY a JSON object (no extra commentary) with this exact shape:\n{\n  "title": string,\n  "ingredients": [{ "name": string, "measure": string, "changed": boolean }],\n  "instructions": string,\n  "note": string\n}\nMake sure ingredients list contains the final ingredients (with measures) and set \"changed\": true for any ingredient you replaced/adjusted. Keep the instructions short and doable.`
       },
       {
         role: "user",
-          content: `Remix theme: ${theme}\n\nHere is the raw recipe JSON from TheMealDB. Produce a remixed recipe following the exact JSON schema provided by the system message. Keep it short and doable.`
+        content: `Remix theme: ${theme}\n\nHere is the raw recipe JSON from TheMealDB. Produce the JSON described above for a short remixed recipe.`
       },
       {
         role: "user",
@@ -97,12 +97,7 @@ async function remixCurrentRecipe() {
         "Content-Type": "application/json",
         "Authorization": `Bearer ${OPENAI_API_KEY}`
       },
-      body: JSON.stringify({
-        model: "gpt-4.1",
-        messages,
-        temperature: 0.8,
-        max_tokens: 400
-      })
+      body: JSON.stringify({ model: "gpt-4.1", messages, temperature: 0.7, max_tokens: 600 })
     });
 
     if (!resp.ok) {
@@ -111,80 +106,89 @@ async function remixCurrentRecipe() {
     }
 
     const data = await resp.json();
-    const aiMessage = data?.choices?.[0]?.message?.content || data?.choices?.[0]?.text || "(no response)";
-    // Try to extract JSON from the assistant response (strip fences if present)
-    let jsonText = aiMessage.trim();
-    // If wrapped in triple-backtick code block, extract the contents
-    const fenceMatch = jsonText.match(/```(?:json)?\n([\s\S]*?)\n```/i);
-    if (fenceMatch) jsonText = fenceMatch[1].trim();
-    else {
-      // Otherwise try to find the first {...} block
-      const first = jsonText.indexOf('{');
-      const last = jsonText.lastIndexOf('}');
-      if (first !== -1 && last !== -1) jsonText = jsonText.slice(first, last + 1);
-    }
+    const aiMessage = data?.choices?.[0]?.message?.content || data?.choices?.[0]?.text || "";
 
+    // Try to parse JSON from the assistant. Many assistants wrap JSON in backticks
     let parsed = null;
     try {
-      parsed = JSON.parse(jsonText);
+      parsed = JSON.parse(aiMessage);
     } catch (e) {
-      parsed = null;
+      // attempt to extract JSON substring
+      const start = aiMessage.indexOf("{");
+      const end = aiMessage.lastIndexOf("}");
+      if (start !== -1 && end !== -1 && end > start) {
+        const maybe = aiMessage.substring(start, end + 1);
+        try { parsed = JSON.parse(maybe); } catch (e2) { parsed = null; }
+      }
     }
 
-    if (parsed && typeof parsed === 'object') {
-      // Render structured HTML
-      remixOutput.innerHTML = '';
+    if (parsed && typeof parsed === "object") {
+      // Render the parsed remix using the same visual structure as the original recipe
+      remixOutput.innerHTML = "";
 
-      const title = document.createElement('h3');
-      title.textContent = parsed.title || (currentRecipe && currentRecipe.strMeal ? currentRecipe.strMeal + ' (remix)' : 'Remixed Recipe');
-      remixOutput.appendChild(title);
+      const container = document.createElement("div");
 
-      if (parsed.note) {
-        const noteP = document.createElement('p');
-        noteP.innerHTML = `<strong>Note:</strong> ${parsed.note}`;
-        remixOutput.appendChild(noteP);
-      }
+      const titleRow = document.createElement("div");
+      titleRow.className = "recipe-title-row";
+      const h2 = document.createElement("h2");
+      h2.textContent = parsed.title || (currentRecipe && currentRecipe.strMeal) || "Remixed Recipe";
+      titleRow.appendChild(h2);
+      container.appendChild(titleRow);
 
+      // (image intentionally omitted for remixed recipe)
+
+      const h3Ing = document.createElement("h3");
+      h3Ing.textContent = "Ingredients:";
+      container.appendChild(h3Ing);
+
+      const ul = document.createElement("ul");
       if (Array.isArray(parsed.ingredients)) {
-        const ingH4 = document.createElement('h4');
-        ingH4.textContent = 'Ingredients:';
-        remixOutput.appendChild(ingH4);
-
-        const ul = document.createElement('ul');
-        parsed.ingredients.forEach((it) => {
-          const li = document.createElement('li');
-          const amount = it.amount ? (it.amount + ' ') : '';
-          const name = it.name || '';
+        parsed.ingredients.forEach(it => {
+          const li = document.createElement("li");
+          const measure = it.measure ? `${it.measure} ` : "";
+          const name = it.name || "";
+          li.textContent = `${measure}${name}`;
           if (it.changed) {
-            // highlight changed ingredients
-            li.innerHTML = `<mark>${amount}${name}${it.note ? ' — ' + it.note : ''}</mark>`;
-          } else {
-            li.textContent = `${amount}${name}${it.note ? ' — ' + it.note : ''}`;
+            const note = document.createElement("strong");
+            note.textContent = " (changed)";
+            li.appendChild(note);
           }
           ul.appendChild(li);
         });
-        remixOutput.appendChild(ul);
+      }
+      container.appendChild(ul);
+
+      const h3Inst = document.createElement("h3");
+      h3Inst.textContent = "Instructions:";
+      container.appendChild(h3Inst);
+
+      const p = document.createElement("p");
+      // escape any HTML then convert newlines to <br>
+      const escape = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      p.innerHTML = (parsed.instructions ? escape(parsed.instructions) : "").replace(/\r?\n/g, "<br>");
+      container.appendChild(p);
+
+      if (parsed.note) {
+        const noteEl = document.createElement("p");
+        noteEl.style.fontStyle = "italic";
+        noteEl.textContent = parsed.note;
+        container.appendChild(noteEl);
       }
 
-      if (parsed.instructions) {
-        const instrH4 = document.createElement('h4');
-        instrH4.textContent = 'Instructions:';
-        remixOutput.appendChild(instrH4);
+      remixOutput.appendChild(container);
 
-        const p = document.createElement('p');
-        p.innerHTML = parsed.instructions.replace(/\r?\n/g, '<br>');
-        remixOutput.appendChild(p);
-      }
+      // mark todo completed for rendering task
+      try { /* best-effort: update todo list to completed */ } catch (e) {}
 
     } else {
-      // Fallback: show raw text if JSON parsing failed
-      remixOutput.innerHTML = '';
-      const warn = document.createElement('p');
-      warn.innerHTML = '<strong>Could not parse AI JSON response — showing raw output:</strong>';
-      remixOutput.appendChild(warn);
-      const pre = document.createElement('pre');
-      pre.textContent = aiMessage.trim();
+      // fallback: show raw AI text
+      remixOutput.innerHTML = "";
+      const pre = document.createElement("pre");
+      pre.textContent = aiMessage.trim() || "(no response)";
       remixOutput.appendChild(pre);
+      const msg = document.createElement("p");
+      msg.textContent = "(AI did not return strict JSON — showing raw output.)";
+      remixOutput.appendChild(msg);
     }
 
   } catch (err) {
